@@ -15,6 +15,7 @@
 # Commands:
 #   hubot k8s [po|rc|svc] (labels) - List all k8s resources under given context
 #   hubot k8s context <name> - Show/change current k8s context
+#   hubot k8s [log|logs] for <pod> - Show latest log for given pod
 #
 # Author:
 #   canthefason
@@ -113,7 +114,28 @@ module.exports = (robot) ->
 
     res.reply "Your current context is changed to `#{context}`"
 
+  robot.respond /k8s (?:logs|log) for (\S+)(?: limit to (\d+) lines)?$/i, (res) ->
+    pod = res.match[1]
+    lines = res.match[2] || 15
+    namespace = getContext res
+    url = "namespaces/#{namespace}/pods/#{pod}/log?tailLines=#{lines}"
+    userFromBrain = robot.brain.userForName(res.message.user.name)
+    roles = robot.auth.userRoles userFromBrain
+    kubeapi.get {path: url, roles}, (err, response) ->
+      if err
+        robot.logger.error err
+        return res.send "Could not fetch logs for #{pod} on *#{namespace}*"
 
+      return res.reply 'Requested resource is not found'  unless response
+
+      reply = "\n"
+      reply = "Here are latest logs from pod *#{pod}* running on *#{namespace}*\n"
+      reply += "```\n"
+      reply += response
+      reply += "```"
+
+      res.reply reply
+    
 class Request
   request = require 'request'
 
@@ -174,7 +196,10 @@ class Request
       if response.statusCode != 200
         return callback new Error("Status code is not OK: #{response.statusCode}")
 
-      callback null, JSON.parse(data)
+      if data.startsWith "{"
+        callback null, JSON.parse(data)
+      else
+        callback null, data
 
 
   generateTokens = ->
